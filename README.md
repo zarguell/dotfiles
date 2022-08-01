@@ -1,2 +1,6 @@
-# dotfiles
-my personal dotfiles
+## Personal Dotfiles
+
+### Dependencies:
+- zsh 
+- powerline 
+- fonts-powerline
