@@ -3,6 +3,7 @@
 Personal dotfiles for GitHub Codespaces (Ubuntu) and local shells.
 
 This repo is optimized for:
+
 - zsh as the default shell
 - a fast “modern UNIX tools” CLI toolkit (bat/eza/rg/fd/zoxide/duf/dust/procs/etc.)
 - Powerlevel10k (p10k) prompt
@@ -11,7 +12,7 @@ This repo is optimized for:
 ## How Codespaces uses this repo
 
 When you select a dotfiles repository in GitHub Codespaces settings and enable “Automatically install dotfiles”, Codespaces clones your dotfiles repo and runs `install.sh` (if present + executable). Changes apply to **new** codespaces.  
-Docs: https://docs.github.com/en/codespaces/setting-your-user-preferences/personalizing-github-codespaces-for-your-account
+Docs: <https://docs.github.com/en/codespaces/setting-your-user-preferences/personalizing-github-codespaces-for-your-account>
 
 ## Files
 
@@ -54,7 +55,7 @@ Set:
 - `terminal.integrated.fontFamily` = `MesloLGS NF`
 
 Powerlevel10k font guide:
-https://github.com/romkatv/powerlevel10k/blob/master/font.md
+<https://github.com/romkatv/powerlevel10k/blob/master/font.md>
 
 ## Persistent storage strategy (Codespaces)
 
@@ -69,13 +70,13 @@ To keep setup fast and deterministic, `install.sh` is written to avoid downloadi
 - If `stable` is already installed, `install.sh` will not update it automatically.
 - If a Rust-based CLI requires a newer compiler, update manually:
 
-```
+```shell
 rustup update stable
 ```
 
 You can also check or change the default toolchain:
 
-```
+```shell
 rustup default
 rustup default stable
 ```
