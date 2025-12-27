@@ -162,6 +162,12 @@ main() {
     bat fd-find git-delta \
     eza zoxide procs dust duf
 
+  if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$(command -v batcat)" "$HOME/.local/bin/bat"
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
   ensure_dir "$PERSIST_ROOT"
 
   if [ "$PERSIST_RUST" -eq 1 ]; then
