@@ -1,74 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sudo apt-get update -y
-
-# Base + quality-of-life (lean)
-sudo apt-get install -y \
-  zsh git curl ca-certificates \
-  fzf ripgrep jq \
-  python3 python3-pip \
-  nodejs npm \
-  build-essential pkg-config libssl-dev
-
-# Try apt first for "modern" tools (OK if some aren't available)
-sudo apt-get install -y \
-  bat fd-find git-delta \
-  eza zoxide procs dust duf || true
-
-# --- Optional: persist Rust/cargo data across container rebuilds ---
-# GitHub notes /workspaces is persisted and suggests symlinking to it for data you want to survive rebuilds. 
+DOTFILES_DIR="/workspaces/.codespaces/.persistedshare/dotfiles"
 PERSIST_ROOT="/workspaces/.persist"
-mkdir -p "$PERSIST_ROOT"
+PERSIST_RUST="${PERSIST_RUST:-1}"
 
-# If you want this behavior, keep it on. If not, set to 0.
-PERSIST_RUST=1
+log() { printf '%s\n' "$*"; }
 
-if [ "$PERSIST_RUST" -eq 1 ]; then
-  mkdir -p "$PERSIST_ROOT/cargo" "$PERSIST_ROOT/rustup" "$PERSIST_ROOT/cargo-target"
+apt_install() { sudo apt-get install -y "$@"; }
+apt_install_optional() { sudo apt-get install -y "$@" || true; }
 
-  # Move existing dirs into persisted storage once, then symlink.
-  if [ -d "$HOME/.cargo" ] && [ ! -L "$HOME/.cargo" ]; then
-    rm -rf "$PERSIST_ROOT/cargo"
-    mv "$HOME/.cargo" "$PERSIST_ROOT/cargo"
+dpkg_remove_if_installed() {
+  local pkg="$1"
+  if dpkg -s "$pkg" >/dev/null 2>&1; then
+    sudo apt-get remove -y "$pkg" || true
   fi
-  if [ -d "$HOME/.rustup" ] && [ ! -L "$HOME/.rustup" ]; then
-    rm -rf "$PERSIST_ROOT/rustup"
-    mv "$HOME/.rustup" "$PERSIST_ROOT/rustup"
+}
+
+ensure_dir() { mkdir -p "$1"; }
+
+persist_dir_into_workspaces() {
+  local src="$1"
+  local dst="$2"
+  ensure_dir "$(dirname "$dst")"
+
+  if [ -d "$src" ] && [ ! -L "$src" ]; then
+    rm -rf "$dst"
+    mv "$src" "$dst"
   fi
 
-  ln -sfn "$PERSIST_ROOT/cargo"  "$HOME/.cargo"
-  ln -sfn "$PERSIST_ROOT/rustup" "$HOME/.rustup"
+  ensure_dir "$dst"
+  ln -sfn "$dst" "$src"
+}
 
-  # Helps cargo reuse build artifacts between installs/builds.
-  export CARGO_TARGET_DIR="$PERSIST_ROOT/cargo-target"
-fi
-
-# --- Ensure rustup is the primary Rust (idempotent) ---
-
-# Remove Ubuntu-managed rustc/cargo if present to avoid rustup PATH conflicts. 
-dpkg -s rustc >/dev/null 2>&1 && sudo apt-get remove -y rustc || true
-dpkg -s cargo >/dev/null 2>&1 && sudo apt-get remove -y cargo || true
-sudo apt-get autoremove -y || true
-
-# Install rustup only if missing
-if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-  export RUSTUP_INIT_SKIP_PATH_CHECK=yes
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-fi
-
-# Make rustup-managed cargo/rustc available in this script run
-# shellcheck disable=SC1090
-source "$HOME/.cargo/env"
-
-# Ensure ~/.cargo/bin is first so the "proper" rustup toolchain is used. 
-export PATH="$HOME/.cargo/bin:$PATH"
-
-# Ensure toolchain exists + is selected (safe to re-run)
-rustup toolchain install stable
-rustup default stable
-
-install_if_missing() {
+cargo_install_if_missing() {
   local cmd="$1"
   local crate="$2"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -76,38 +41,114 @@ install_if_missing() {
   fi
 }
 
-# Cargo fallback only if still missing after apt
-install_if_missing eza eza
-install_if_missing zoxide zoxide
-install_if_missing procs procs
-install_if_missing dust du-dust
-install_if_missing duf duf
-install_if_missing delta git-delta
+git_clone_if_missing() {
+  local url="$1"
+  local dest="$2"
+  if [ ! -d "$dest" ]; then
+    git clone --depth=1 "$url" "$dest"
+  fi
+}
 
-# fd: on Ubuntu it's often "fdfind" via apt; only install "fd" if neither exists.
-if ! command -v fd >/dev/null 2>&1 && ! command -v fdfind >/dev/null 2>&1; then
-  cargo install --locked fd-find
-fi
+symlink_with_backup() {
+  local src="$1"
+  local tgt="$2"
 
-# Powerlevel10k (minimal install: clone + source)
-if [ ! -d "$HOME/.local/share/powerlevel10k" ]; then
-  git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$HOME/.local/share/powerlevel10k"
-fi
+  [ -e "$src" ] || return 0
 
-# Make zsh the default shell (Codespaces docs recommend using chsh in your install script) 
-sudo chsh "$(id -un)" --shell "/usr/bin/zsh" || true
-
-DOTFILES_DIR="/workspaces/.codespaces/.persistedshare/dotfiles"
-
-if [ -f "$DOTFILES_DIR/.zshrc" ]; then
-  # Backup existing file once if it's a real file (not a symlink)
-  if [ -f "$HOME/.zshrc" ] && [ ! -L "$HOME/.zshrc" ] && [ ! -f "$HOME/.zshrc.bak" ]; then
-    mv "$HOME/.zshrc" "$HOME/.zshrc.bak"
+  if [ -e "$tgt" ] && [ ! -L "$tgt" ] && [ ! -e "${tgt}.bak" ]; then
+    mv "$tgt" "${tgt}.bak"
   fi
 
-  ln -sfn "$DOTFILES_DIR/.zshrc" "$HOME/.zshrc"
-fi
+  ln -sfn "$src" "$tgt"
+}
 
-if [ -f "$DOTFILES_DIR/.p10k.zsh" ]; then
-  ln -sfn "$DOTFILES_DIR/.p10k.zsh" "$HOME/.p10k.zsh"
-fi
+ensure_rustup_no_download() {
+  # Avoid conflicts with Ubuntu-packaged Rust
+  dpkg_remove_if_installed rustc
+  dpkg_remove_if_installed cargo
+  sudo apt-get autoremove -y || true
+
+  if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+    export RUSTUP_INIT_SKIP_PATH_CHECK=yes
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  fi
+
+  # shellcheck disable=SC1090
+  source "$HOME/.cargo/env"
+  export PATH="$HOME/.cargo/bin:$PATH"
+
+  # Only install stable if not present (avoid downloads on repeat runs)
+  if ! rustup toolchain list | grep -q '^stable'; then
+    rustup toolchain install stable
+  fi
+
+  # Only set default if stable exists
+  if rustup toolchain list | grep -q '^stable'; then
+    rustup default stable >/dev/null 2>&1 || true
+  fi
+}
+
+main() {
+  sudo apt-get update -y
+
+  log "Installing base packages..."
+  apt_install \
+    zsh git curl ca-certificates \
+    fzf ripgrep jq \
+    python3 python3-pip \
+    nodejs npm \
+    build-essential pkg-config libssl-dev
+
+  log "Installing modern tools (apt, best-effort)..."
+  apt_install_optional \
+    bat fd-find git-delta \
+    eza zoxide procs dust duf
+
+  ensure_dir "$PERSIST_ROOT"
+
+  if [ "$PERSIST_RUST" -eq 1 ]; then
+    log "Persisting Rust caches under $PERSIST_ROOT..."
+    persist_dir_into_workspaces "$HOME/.cargo"  "$PERSIST_ROOT/cargo"
+    persist_dir_into_workspaces "$HOME/.rustup" "$PERSIST_ROOT/rustup"
+    ensure_dir "$PERSIST_ROOT/cargo-target"
+    export CARGO_TARGET_DIR="$PERSIST_ROOT/cargo-target"
+  fi
+
+  log "Ensuring rustup + stable (no auto-download on rerun)..."
+  ensure_rustup_no_download
+
+  log "Installing Rust CLIs (cargo fallback only if missing)..."
+  cargo_install_if_missing eza eza
+  cargo_install_if_missing zoxide zoxide
+  cargo_install_if_missing procs procs
+  cargo_install_if_missing dust du-dust
+  cargo_install_if_missing duf duf
+  cargo_install_if_missing delta git-delta
+
+  # fd: Ubuntu may provide "fdfind" instead of "fd"
+  if ! command -v fd >/dev/null 2>&1 && ! command -v fdfind >/dev/null 2>&1; then
+    cargo install --locked fd-find
+  fi
+
+  log "Installing Powerlevel10k..."
+  git_clone_if_missing \
+    https://github.com/romkatv/powerlevel10k.git \
+    "$HOME/.local/share/powerlevel10k"
+
+  log "Setting default shell to zsh..."
+  sudo chsh "$(id -un)" --shell "/usr/bin/zsh" || true
+
+  log "Linking dotfiles into \$HOME..."
+  symlink_with_backup "$DOTFILES_DIR/.zshrc"    "$HOME/.zshrc"
+  symlink_with_backup "$DOTFILES_DIR/.bashrc"   "$HOME/.bashrc"
+  symlink_with_backup "$DOTFILES_DIR/.p10k.zsh" "$HOME/.p10k.zsh"
+
+  if [ -d "$DOTFILES_DIR/.config/shell" ]; then
+    ensure_dir "$HOME/.config"
+    ln -sfn "$DOTFILES_DIR/.config/shell" "$HOME/.config/shell"
+  fi
+
+  log "Done."
+}
+
+main "$@"
