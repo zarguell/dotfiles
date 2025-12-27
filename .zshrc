@@ -36,7 +36,6 @@ bindkey '^R' fzf-history-widget 2>/dev/null || true
 
 # ---- Modern defaults (guarded + Ubuntu compatibility) ----
 command -v bat  >/dev/null 2>&1 && alias cat='bat'
-command -v batcat >/dev/null 2>&1 && alias cat='batcat'
 
 command -v eza  >/dev/null 2>&1 && alias ls='eza --group-directories-first'
 command -v rg   >/dev/null 2>&1 && alias grep='rg'
