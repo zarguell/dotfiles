@@ -22,7 +22,7 @@ if command -v delta >/dev/null 2>&1; then
   export GIT_PAGER=delta
 fi
 
-export ANTHROPIC_BASE_URL="https://api.z.ai/api/coding/paas/v4"
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 export API_TIMEOUT_MS="3000000"
 # export ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-4.7"
 # export ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-4.7"
