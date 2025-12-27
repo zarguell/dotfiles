@@ -1,0 +1,7 @@
+eza eza
+zoxide zoxide
+procs procs
+du-dust dust
+duf duf
+git-delta delta
+fd-find fd

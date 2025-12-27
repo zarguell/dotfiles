@@ -3,7 +3,15 @@ set -euo pipefail
 
 DOTFILES_DIR="/workspaces/.codespaces/.persistedshare/dotfiles"
 PERSIST_ROOT="/workspaces/.persist"
+
 PERSIST_RUST="${PERSIST_RUST:-1}"
+
+# New: prefer downloading prebuilt tools from GitHub Releases in Codespaces
+DOTFILES_USE_BIN_CACHE="${DOTFILES_USE_BIN_CACHE:-1}"
+TOOLS_RELEASE_TAG="${TOOLS_RELEASE_TAG:-tools-linux-x86_64}"
+TOOLS_ASSET_NAME="${TOOLS_ASSET_NAME:-dotfiles-tools-linux-x86_64.tar.gz}"
+TOOLS_SHA_NAME="${TOOLS_SHA_NAME:-dotfiles-tools-linux-x86_64.sha256}"
+TOOLS_REPO="${TOOLS_REPO:-zarguell/dotfiles}"
 
 log() { printf '%s\n' "$*"; }
 
@@ -63,7 +71,6 @@ symlink_with_backup() {
 }
 
 ensure_rustup_no_download() {
-  # Avoid conflicts with Ubuntu-packaged Rust
   dpkg_remove_if_installed rustc
   dpkg_remove_if_installed cargo
   sudo apt-get autoremove -y || true
@@ -88,6 +95,42 @@ ensure_rustup_no_download() {
   fi
 }
 
+install_prebuilt_tools_if_enabled() {
+  # Downloads a tarball that contains ./bin/<tools> and extracts it into ~/.local
+  # so binaries end up in ~/.local/bin.
+  [ "$DOTFILES_USE_BIN_CACHE" -eq 1 ] || return 0
+
+  local base="https://github.com/${TOOLS_REPO}/releases/download/${TOOLS_RELEASE_TAG}"
+  local tar_url="${base}/${TOOLS_ASSET_NAME}"
+  local sha_url="${base}/${TOOLS_SHA_NAME}"
+
+  # Prefer persisted bin dir if you want it across rebuilds, else ~/.local/bin.
+  local bin_root="$HOME/.local"
+  local bin_dir="$bin_root/bin"
+  ensure_dir "$bin_dir"
+
+  # Minimal deps: curl + tar + sha256sum (coreutils). curl/tar are generally present; ensure curl is installed earlier.
+  log "Attempting prebuilt tools cache from release ${TOOLS_RELEASE_TAG}..."
+  if curl -fsSL "$tar_url" -o /tmp/"$TOOLS_ASSET_NAME"; then
+    # Optional integrity check if sha file exists
+    if curl -fsSL "$sha_url" -o /tmp/"$TOOLS_SHA_NAME"; then
+      (cd /tmp && sha256sum -c "$TOOLS_SHA_NAME") || {
+        log "Checksum failed for prebuilt tools; ignoring cache."
+        rm -f /tmp/"$TOOLS_ASSET_NAME" /tmp/"$TOOLS_SHA_NAME"
+        return 0
+      }
+    fi
+
+    tar -xzf /tmp/"$TOOLS_ASSET_NAME" -C "$bin_root"
+    rm -f /tmp/"$TOOLS_ASSET_NAME" /tmp/"$TOOLS_SHA_NAME"
+
+    export PATH="$bin_dir:$PATH"
+    log "Prebuilt tools installed into $bin_dir."
+  else
+    log "No prebuilt tools asset found (or download failed); will compile via cargo as fallback."
+  fi
+}
+
 main() {
   sudo apt-get update -y
 
@@ -97,7 +140,8 @@ main() {
     fzf ripgrep jq \
     python3 python3-pip \
     nodejs npm \
-    build-essential pkg-config libssl-dev
+    build-essential pkg-config libssl-dev \
+    tar coreutils
 
   log "Installing modern tools (apt, best-effort)..."
   apt_install_optional \
@@ -113,6 +157,9 @@ main() {
     ensure_dir "$PERSIST_ROOT/cargo-target"
     export CARGO_TARGET_DIR="$PERSIST_ROOT/cargo-target"
   fi
+
+  # New: try release asset first so Codespaces doesn't compile everything.
+  install_prebuilt_tools_if_enabled
 
   log "Ensuring rustup + stable (no auto-download on rerun)..."
   ensure_rustup_no_download

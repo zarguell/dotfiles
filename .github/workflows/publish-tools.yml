@@ -1,0 +1,49 @@
+name: Publish dotfiles tools (linux-x86_64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/publish-tools.yml
+      - tools-manifest.txt
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (toolchain)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tools into a bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/root
+          # Install binaries into dist/root/bin using Cargo's --root (binaries go to <root>/bin). [web:79]
+          while read -r crate cmd; do
+            [ -z "${crate:-}" ] && continue
+            cargo install --locked --root dist/root "$crate"
+          done < tools-manifest.txt
+
+          tar -C dist/root -czf dist/dotfiles-tools-linux-x86_64.tar.gz .
+          sha256sum dist/dotfiles-tools-linux-x86_64.tar.gz | tee dist/dotfiles-tools-linux-x86_64.sha256
+
+      - name: Create/Update GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="tools-linux-x86_64"
+          TITLE="Dotfiles tools (linux-x86_64)"
+
+          # Create the release if it doesn't exist; otherwise just upload/overwrite assets.
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" -t "$TITLE" -n "$TITLE"
+          gh release upload "$TAG" dist/dotfiles-tools-linux-x86_64.tar.gz --clobber
+          gh release upload "$TAG" dist/dotfiles-tools-linux-x86_64.sha256 --clobber
