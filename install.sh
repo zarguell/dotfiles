@@ -16,7 +16,14 @@ TOOLS_REPO="${TOOLS_REPO:-zarguell/dotfiles}"
 log() { printf '%s\n' "$*"; }
 
 apt_install() { sudo apt-get install -y "$@"; }
-apt_install_optional() { sudo apt-get install -y "$@" || true; }
+apt_install_optional() {
+  local pkg
+  for pkg in "$@"; do
+    if ! sudo apt-get install -y "$pkg"; then
+      log "apt optional package failed (skipping): $pkg"
+    fi
+  done
+}
 
 dpkg_remove_if_installed() {
   local pkg="$1"
