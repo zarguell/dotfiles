@@ -96,39 +96,46 @@ ensure_rustup_no_download() {
 }
 
 install_prebuilt_tools_if_enabled() {
-  # Downloads a tarball that contains ./bin/<tools> and extracts it into ~/.local
-  # so binaries end up in ~/.local/bin.
   [ "$DOTFILES_USE_BIN_CACHE" -eq 1 ] || return 0
 
-  local base="https://github.com/${TOOLS_REPO}/releases/download/${TOOLS_RELEASE_TAG}"
-  local tar_url="${base}/${TOOLS_ASSET_NAME}"
-  local sha_url="${base}/${TOOLS_SHA_NAME}"
+  local tag="tools-linux-x86_64"
+  local asset="dotfiles-tools-linux-x86_64.tar.gz"
+  local sha="dotfiles-tools-linux-x86_64.sha256"
+  local base="https://github.com/zarguell/dotfiles/releases/download/${tag}"
 
-  # Prefer persisted bin dir if you want it across rebuilds, else ~/.local/bin.
+  local tar_url="${base}/${asset}"
+  local sha_url="${base}/${sha}"
+
+  local tmp_tar="/tmp/${asset}"
+  local tmp_sha="/tmp/${sha}"
+
   local bin_root="$HOME/.local"
   local bin_dir="$bin_root/bin"
   ensure_dir "$bin_dir"
 
-  # Minimal deps: curl + tar + sha256sum (coreutils). curl/tar are generally present; ensure curl is installed earlier.
-  log "Attempting prebuilt tools cache from release ${TOOLS_RELEASE_TAG}..."
-  if curl -fsSL "$tar_url" -o /tmp/"$TOOLS_ASSET_NAME"; then
-    # Optional integrity check if sha file exists
-    if curl -fsSL "$sha_url" -o /tmp/"$TOOLS_SHA_NAME"; then
-      (cd /tmp && sha256sum -c "$TOOLS_SHA_NAME") || {
-        log "Checksum failed for prebuilt tools; ignoring cache."
-        rm -f /tmp/"$TOOLS_ASSET_NAME" /tmp/"$TOOLS_SHA_NAME"
-        return 0
-      }
-    fi
-
-    tar -xzf /tmp/"$TOOLS_ASSET_NAME" -C "$bin_root"
-    rm -f /tmp/"$TOOLS_ASSET_NAME" /tmp/"$TOOLS_SHA_NAME"
-
-    export PATH="$bin_dir:$PATH"
-    log "Prebuilt tools installed into $bin_dir."
-  else
-    log "No prebuilt tools asset found (or download failed); will compile via cargo as fallback."
+  log "Attempting prebuilt tools cache from release ${tag}..."
+  if ! curl -fLsS "$tar_url" -o "$tmp_tar"; then
+    log "Prebuilt tools asset missing; falling back to local build."
+    return 0
   fi
+
+  # Verify if sha file is present; if it isn't, still allow install.
+  if curl -fLsS "$sha_url" -o "$tmp_sha"; then
+    # The sha file should reference the tarball filename; run the check in /tmp.
+    (cd /tmp && sha256sum -c "$sha") || {
+      log "Checksum failed for prebuilt tools; ignoring cache and falling back."
+      rm -f "$tmp_tar" "$tmp_sha"
+      return 0
+    }
+  else
+    log "No sha256 file found; skipping checksum verification."
+  fi
+
+  tar -xzf "$tmp_tar" -C "$bin_root"
+  rm -f "$tmp_tar" "$tmp_sha"
+
+  export PATH="$bin_dir:$PATH"
+  log "Prebuilt tools installed into $bin_dir."
 }
 
 main() {
