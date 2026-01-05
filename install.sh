@@ -6,6 +6,20 @@ PERSIST_ROOT="/workspaces/.persist"
 
 PERSIST_RUST="${PERSIST_RUST:-1}"
 
+# ----------------------------
+# Feature toggles + config
+# ----------------------------
+# Set any of these to 0 to skip installing that tool.
+INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
+INSTALL_OPENCODE="${INSTALL_OPENCODE:-1}"
+INSTALL_UV="${INSTALL_UV:-1}"
+INSTALL_AIDER="${INSTALL_AIDER:-1}"
+
+# Python version used by uv for tool installs (aider here)
+PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+UV_PYTHON_BIN="${UV_PYTHON_BIN:-python${PYTHON_VERSION}}"
+AIDER_SPEC="${AIDER_SPEC:-aider-chat@latest}"
+
 # New: prefer downloading prebuilt tools from GitHub Releases in Codespaces
 DOTFILES_USE_BIN_CACHE="${DOTFILES_USE_BIN_CACHE:-1}"
 TOOLS_RELEASE_TAG="${TOOLS_RELEASE_TAG:-tools-linux-x86_64}"
@@ -128,7 +142,6 @@ install_prebuilt_tools_if_enabled() {
 
   # Verify if sha file is present; if it isn't, still allow install.
   if curl -fLsS "$sha_url" -o "$tmp_sha"; then
-    # The sha file should reference the tarball filename; run the check in /tmp.
     (cd /tmp && sha256sum -c "$sha") || {
       log "Checksum failed for prebuilt tools; ignoring cache and falling back."
       rm -f "$tmp_tar" "$tmp_sha"
@@ -143,6 +156,64 @@ install_prebuilt_tools_if_enabled() {
 
   export PATH="$bin_dir:$PATH"
   log "Prebuilt tools installed into $bin_dir."
+}
+
+# ----------------------------
+# Feature/tool install helpers
+# ----------------------------
+run_feature() {
+  local feature_name="$1"
+  local enabled="$2"
+  shift 2
+
+  if [ "${enabled}" -eq 1 ]; then
+    log "Installing ${feature_name}..."
+    "$@"
+  else
+    log "Skipping ${feature_name} (disabled)."
+  fi
+}
+
+ensure_npm_global_pkg() {
+  local pkg="$1"
+  local bin_check="${2:-}"
+
+  if [ -n "$bin_check" ] && command -v "$bin_check" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if npm list -g --depth=0 "$pkg" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  npm install -g "$pkg"
+}
+
+install_claude_code() {
+  # Installs via npm (package: @anthropic-ai/claude-code) [web:19]
+  ensure_npm_global_pkg "@anthropic-ai/claude-code" "claude"
+}
+
+install_opencode() {
+  # Installs via npm (package: opencode-ai) [web:20]
+  ensure_npm_global_pkg "opencode-ai" "opencode"
+}
+
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Official uv standalone installer [web:10]
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  # Common install location for the script is ~/.local/bin; ensure it's on PATH
+  export PATH="$HOME/.local/bin:$PATH"
+}
+
+install_aider_with_uv() {
+  ensure_uv
+  uv tool install --force --python "${UV_PYTHON_BIN}" --with pip "${AIDER_SPEC}"
 }
 
 main() {
@@ -196,6 +267,14 @@ main() {
   if ! command -v fd >/dev/null 2>&1 && ! command -v fdfind >/dev/null 2>&1; then
     cargo install --locked fd-find
   fi
+
+  # ----------------------------
+  # Feature installs (toggleable)
+  # ----------------------------
+  run_feature "uv"          "${INSTALL_UV}"          ensure_uv
+  run_feature "aider"       "${INSTALL_AIDER}"       install_aider_with_uv
+  run_feature "claude-code" "${INSTALL_CLAUDE_CODE}" install_claude_code
+  run_feature "opencode"    "${INSTALL_OPENCODE}"    install_opencode
 
   log "Installing Powerlevel10k..."
   git_clone_if_missing \
