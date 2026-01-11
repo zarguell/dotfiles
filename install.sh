@@ -250,11 +250,10 @@ main() {
     mkdir -p "$HOME/.local/bin"
     ln -sfn "$(command -v batcat)" "$HOME/.local/bin/bat"
     export PATH="$HOME/.local/bin:$PATH"
-  fi
+   fi
 
-  ensure_dir "$PERSIST_ROOT"
-
-  if [ "$PERSIST_RUST" -eq 1 ]; then
+   if [ "$PERSIST_RUST" -eq 1 ]; then
+     ensure_dir "$PERSIST_ROOT"
     log "Persisting Rust caches under $PERSIST_ROOT..."
     persist_dir_into_workspaces "$HOME/.cargo"  "$PERSIST_ROOT/cargo"
     persist_dir_into_workspaces "$HOME/.rustup" "$PERSIST_ROOT/rustup"
