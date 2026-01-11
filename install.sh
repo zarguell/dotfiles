@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOTFILES_DIR="/workspaces/.codespaces/.persistedshare/dotfiles"
-PERSIST_ROOT="/workspaces/.persist"
+# Run as root/sudo automatically
+if [ "$EUID" -ne 0 ]; then
+  exec sudo "$0" "$@"
+fi
+
+# Detect environment and set paths
+if [ -z "${CODESPACE_NAME:-}" ]; then
+  # Not in GitHub Codespaces (e.g., local VM)
+  DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PERSIST_RUST=0
+else
+  # In GitHub Codespaces
+  DOTFILES_DIR="/workspaces/.codespaces/.persistedshare/dotfiles"
+  PERSIST_ROOT="/workspaces/.persist"
+fi
 
 PERSIST_RUST="${PERSIST_RUST:-1}"
 
